@@ -47,13 +47,23 @@ def read_lvl_(it: iter):
     get_int32(it)
     get_int32(it)
 
-    read_scr_(it)
+    chunk_name = read_magic(it).decode('utf-8')
+    chunk_size = get_int32(it)
+
+    print(f'{chunk_name} ({chunk_size})')
+
+    if chunk_name == 'scr_':
+        read_scr_(it)
+    else:
+        get_bytes(it, chunk_size)
+
+    try:
+        read_lvl_(it)
+    except StopIteration:
+        pass
 
 
 def read_scr_(it: iter):
-    read_magic(it)
-    get_int32(it)
-
     name = get_param(it)
     info = get_param(it)
     body = get_param(it)
@@ -123,7 +133,7 @@ def handle_function(it, size_instruction_bytes, size_op_bits: int, size_b_bits: 
     num_numbers = get_int32(it)
     numbers = []
     for i in range(num_numbers):
-        numbers.append(get_int32(it))
+        numbers.append(struct.unpack('f', get_bytes(it, 4))[0])
 
     # - Functions
     num_functions = get_int32(it)
