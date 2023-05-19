@@ -2,6 +2,7 @@ import sys
 import struct
 import math
 import pickle
+from pathlib import Path
 
 from shared import Chunk
 
@@ -41,7 +42,7 @@ def read_magic(it: iter) -> bytearray:
     return get_bytes(it, 4)
 
 
-def read_lvl_(it: iter):
+def read_lvl_(it: iter, folder: Path):
     read_magic(it)
     get_int32(it)
     get_int32(it)
@@ -50,28 +51,31 @@ def read_lvl_(it: iter):
     chunk_name = read_magic(it).decode('utf-8')
     chunk_size = get_int32(it)
 
-    print(f'{chunk_name} ({chunk_size})')
-
     if chunk_name == 'scr_':
-        read_scr_(it)
+        name, size, chunk = read_scr_(it)
+
+        print(f'{name} ({size} bytes)')
+        with open(folder / (name + '.dat'), 'wb') as file:
+            pickle.dump(chunk, file)
+
     else:
         get_bytes(it, chunk_size)
 
     try:
-        read_lvl_(it)
+        read_lvl_(it, folder)
     except StopIteration:
         pass
 
 
-def read_scr_(it: iter):
-    name = get_param(it)
+def read_scr_(it: iter) -> (str, int, Chunk):
+    name = get_param(it)[:-1].decode('utf-8')
     info = get_param(it)
     body = get_param(it)
 
-    handle_script(body)
+    return name, len(body), handle_script(body)
 
 
-def handle_script(body: bytes):
+def handle_script(body: bytes) -> Chunk:
     it = iter(body)
     assert (next(it) == 0x1B)  # .
     assert (next(it) == 0x4C)  # L
@@ -93,13 +97,12 @@ def handle_script(body: bytes):
 
     chunk = handle_function(it, size_instruction_bytes, size_op_bits, size_b_bits)
 
-    with open(sys.argv[1] + '.dat', 'wb') as file:
-        pickle.dump(chunk, file)
+    return chunk
 
 
 def handle_function(it, size_instruction_bytes, size_op_bits: int, size_b_bits: int) -> Chunk:
     name_size = get_int32(it)
-    name = str(get_bytes(it, name_size), encoding='utf-8')
+    name = get_bytes(it, name_size)[:-1].decode('utf-8')
 
     line = get_int32(it)
     parameters = get_int32(it)
@@ -127,7 +130,7 @@ def handle_function(it, size_instruction_bytes, size_op_bits: int, size_b_bits: 
     strings = []
     for i in range(num_strings):
         size = get_int32(it)
-        strings.append(str(get_bytes(it, size), encoding='utf-8'))
+        strings.append(get_bytes(it, size)[:-1].decode('utf-8'))
 
     # - Numbers
     num_numbers = get_int32(it)
@@ -150,7 +153,7 @@ def handle_function(it, size_instruction_bytes, size_op_bits: int, size_b_bits: 
     return Chunk(name, line, parameters, variadic, max_stack, locals, lines, strings, numbers, functions, instructions)
 
 
-def main(file):
+def main(file, folder: Path):
     it = iter(bytes(open(file, 'rb').read()))
     try:
         assert (next(it) == 0x75)  # u
@@ -160,11 +163,20 @@ def main(file):
 
         file_size = get_int32(it)
 
-        read_lvl_(it)
+        read_lvl_(it, folder)
 
     except StopIteration as e:
         print(e)
 
 
 if __name__ == '__main__':
-    main(sys.argv[1])
+    if len(sys.argv) < 2:
+        print('Pass one or more \'*.lvl\' files as arguments.\n\n'
+              'Only files containing a \'scr_\' chunk will produce a \'*.dat\' file which contains '
+              'a Lua 4.0 program stored in a pickled \'Chunk\' structure which contains the bytecode.')
+        exit(1)
+
+    for file in sys.argv[1:]:
+        folder = Path(Path(file).stem)
+        folder.mkdir(exist_ok=True)
+        main(file, folder)
