@@ -1,128 +1,32 @@
+import os.path
 import sys
 import pickle
+from pathlib import Path
 
 from shared import Chunk
 from iter import Iterator
-
-INT_MAX = 2147483647 - 2
-
-
-def get_OP(instruction: int) -> int:
-    return instruction & 0x0000003F
-
-
-def get_U(instruction: int) -> int:
-    return (instruction & 0xFFFFFFC0) >> 6
-
-
-def get_S(instruction: int) -> int:
-    return ((instruction & 0xFFFFFFC0) - INT_MAX) >> 6
-
-
-def get_A(instruction: int) -> int:
-    return (instruction & 0xFFFF8000) >> 15
-
-
-def get_B(instruction: int) -> int:
-    return (instruction & 0x00007FC0) >> 6
-
-
-OP_NAME = [
-    "END",  # 0b000000, 0
-    "RETURN",  # 0b000001, 1
-
-    "CALL",  # 0b000010, 2
-    "TAILCALL",
-
-    "PUSHNIL",  # 0b000100, 4
-    "POP",
-
-    "PUSHINT",
-    "PUSHSTRING",
-    "PUSHNUM",  # 0b001000, 8
-    "PUSHNEGNUM",
-
-    "PUSHUPVALUE",
-
-    "GETLOCAL",
-    "GETGLOBAL",
-
-    "GETTABLE",
-    "GETDOTTED",
-    "GETINDEXED",
-    "PUSHSELF",  # 0b010000, 16
-
-    "CREATETABLE",
-
-    "SETLOCAL",
-    "SETGLOBAL",
-    "SETTABLE",
-
-    "SETLIST",
-    "SETMAP",
-
-    "ADD",
-    "ADDI",
-    "SUB",
-    "MULT",
-    "DIV",
-    "POW",
-    "CONCAT",
-    "MINUS",
-    "NOT",
-
-    "JMPNE",  # 0b100000, 32
-    "JMPEQ",
-    "JMPLT",
-    "JMPLE",
-    "JMPGT",
-    "JMPGE",
-
-    "JMPT",
-    "JMPF",
-    "JMPONT",
-    "JMPONF",
-    "JMP",
-
-    "PUSHNILJMP",
-
-    "FORPREP",
-    "FORLOOP",
-
-    "LFORPREP",
-    "LFORLOOP",
-
-    "CLOSURE"  # 0b110000, 48
-]
-
-
-class OP:
-    END, RETURN, CALL, TAILCALL, PUSHNIL, POP, PUSHINT, PUSHSTRING, PUSHNUM, PUSHNEGNUM, PUSHUPVALUE, GETLOCAL, \
-    GETGLOBAL, GETTABLE, GETDOTTED, GETINDEXED, PUSHSELF, CREATETABLE, SETLOCAL, SETGLOBAL, SETTABLE, SETLIST, \
-    SETMAP, ADD, ADDI, SUB, MULT, DIV, POW, CONCAT, MINUS, NOT, JMPNE, JMPEQ, JMPLT, JMPLE, JMPGT, JMPGE, JMPT, \
-    JMPF, JMPONT, JMPONF, JMP, PUSHNILJMP, FORPREP, FORLOOP, LFORPREP, LFORLOOP, CLOSURE = range(49)
-
-
-def printf(*args, indent=2):
-    print(' ' * indent, *args, end=' ')
+from lua4 import OP, OP_NAME, get_OP, get_B, get_S, ASTRoot, ASTClosure, ASTCall
 
 
 def process_closure(it: Iterator, chunk: Chunk, stack, local_vars):
+    name = ''
+    statements = []
+
     operator = it.next()
 
     if operator == OP.SETGLOBAL:
         name = chunk.strings[get_B(operator)]
-        printf(f'function {name}()\n')
     else:
         it.prev()
-        printf(f'function ()\n')
 
     for child in chunk.functions:
-        process_chunk(child)
+        statements.append(process_chunk(child))
 
     operator = it.next()
-    if operator == OP.END:
-        printf(f'end')
+    if operator != OP.END:
+        assert False, 'END operator expected!'
+
+    return ASTClosure(name, statements)
 
 
 def process_call(it: Iterator, chunk: Chunk, stack, local_vars):
@@ -135,7 +39,11 @@ def process_call(it: Iterator, chunk: Chunk, stack, local_vars):
                 out.append(f'"{str(arg)}"')
         return out
 
-    printf(f'{stack[0]}({", ".join(map_type(stack[1:]))})\n')
+    return ASTCall(stack[0], map_type(stack[1:]))
+
+
+def skip(it: Iterator, chunk: Chunk, stack, local_vars):
+    pass
 
 
 def build_stack(it: Iterator, chunk: Chunk, stack, local_vars):
@@ -158,16 +66,24 @@ def build_stack(it: Iterator, chunk: Chunk, stack, local_vars):
         print('#TODO:', OP_NAME[operator])
 
 
-HANDLE = {
+PROCESS = {
     OP.CLOSURE: process_closure,
-    OP.CALL: process_call
+    OP.CALL:    process_call
+}
+
+
+SKIP = {
+    OP.END: 0
 }
 
 
 def process_chunk(chunk: Chunk):
     it = Iterator(chunk.instructions)
+
     stack = []
     local_vars = []
+
+    root = ASTRoot()
 
     # Local variable definition at the start of a chunk
     while get_OP(it.get()) == OP.PUSHINT:
@@ -180,9 +96,11 @@ def process_chunk(chunk: Chunk):
         for instruction in it:
             operator = get_OP(instruction)
 
-            if operator in HANDLE:
-                HANDLE[operator](it, chunk, stack, local_vars)
+            if operator in PROCESS:
+                root += PROCESS[operator](it, chunk, stack, local_vars)
                 stack = []
+            elif operator in SKIP:
+                pass
             else:
                 build_stack(it, chunk, stack, local_vars)
 
@@ -191,12 +109,32 @@ def process_chunk(chunk: Chunk):
     except Exception as e:
         print(e)
 
+    return root
 
-def main(file):
+
+def main(file: Path):
     chunk = pickle.load(open(file, 'rb'))
 
-    process_chunk(chunk)
+    ast = process_chunk(chunk)
+
+    script_name = str(file.parent / file.stem) + '.lua'
+    print(script_name)
+
+    with open(script_name, 'w') as script:
+        script.write(ast.print(0))
 
 
 if __name__ == '__main__':
-    main(sys.argv[1])
+    if len(sys.argv) < 2:
+        print('Pass one or more \'*.dat\' files as arguments.\n\n'
+              'Produces a \'*.lua\' script file.\n'
+              'Use \'*\' wildcard for multiple files with a target folder (*.dat mission).')
+        exit(1)
+
+    if sys.argv[1][0] == '*':
+        files = Path(sys.argv[2]).glob(sys.argv[1])
+    else:
+        files = sys.argv[1:]
+
+    for file in files:
+        main(Path(file))
