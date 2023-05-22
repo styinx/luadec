@@ -43,12 +43,7 @@ def read_magic(it: iter) -> bytearray:
 
 
 def read_lvl_(it: iter, folder: Path):
-    read_magic(it)
-    get_int32(it)
-    get_int32(it)
-    get_int32(it)
-
-    chunk_name = read_magic(it).decode('utf-8')
+    chunk_name = read_magic(it).decode('latin-1')
     chunk_size = get_int32(it)
 
     if chunk_name == 'scr_':
@@ -58,17 +53,25 @@ def read_lvl_(it: iter, folder: Path):
         with open(folder / (name + '.dat'), 'wb') as file:
             pickle.dump(chunk, file)
 
+    elif chunk_name == 'lvl_':
+        get_int32(it)
+        get_int32(it)
+
     else:
         get_bytes(it, chunk_size)
 
     try:
         read_lvl_(it, folder)
+
     except StopIteration:
         pass
 
+    except Exception as e:
+        print(e)
+
 
 def read_scr_(it: iter) -> (str, int, Chunk):
-    name = get_param(it)[:-1].decode('utf-8')
+    name = get_param(it)[:-1].decode('latin-1')
     info = get_param(it)
     body = get_param(it)
 
@@ -102,7 +105,7 @@ def handle_script(body: bytes) -> Chunk:
 
 def handle_function(it, size_instruction_bytes, size_op_bits: int, size_b_bits: int) -> Chunk:
     name_size = get_int32(it)
-    name = get_bytes(it, name_size)[:-1].decode('utf-8')
+    name = get_bytes(it, name_size)[:-1].decode('latin-1')
 
     line = get_int32(it)
     parameters = get_int32(it)
@@ -130,7 +133,7 @@ def handle_function(it, size_instruction_bytes, size_op_bits: int, size_b_bits: 
     strings = []
     for i in range(num_strings):
         size = get_int32(it)
-        strings.append(get_bytes(it, size)[:-1].decode('utf-8'))
+        strings.append(get_bytes(it, size)[:-1].decode('latin-1'))
 
     # - Numbers
     num_numbers = get_int32(it)
@@ -166,6 +169,9 @@ def main(file, folder: Path):
         read_lvl_(it, folder)
 
     except StopIteration as e:
+        pass
+
+    except Exception as e:
         print(e)
 
 
