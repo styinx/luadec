@@ -98,21 +98,22 @@ def handle_script(body: bytes) -> Chunk:
     test_number = struct.unpack('f', get_bytes(it, size_test_number_bits))
     assert (math.isclose(test_number == 3.14159265358979323846E8, 0))
 
-    chunk = handle_function(it, size_instruction_bytes, size_op_bits, size_b_bits)
+    chunk = handle_chunk(it, size_instruction_bytes, size_op_bits, size_b_bits)
 
     return chunk
 
 
-def handle_function(it, size_instruction_bytes, size_op_bits: int, size_b_bits: int) -> Chunk:
+def handle_chunk(it, size_instruction_bytes, size_op_bits: int, size_b_bits: int) -> Chunk:
     name_size = get_int32(it)
     name = get_bytes(it, name_size)[:-1].decode('latin-1')
 
     line = get_int32(it)
     parameters = get_int32(it)
     variadic = get_bytes(it, 1) == 0x01
-    max_stack = get_int32(it)
+    stacks = get_int32(it)
 
     # Locals
+    # Note: SWBF does not seem to save local variable names
     num_locals = get_int32(it)
     locals = []
     for i in range(num_locals):
@@ -145,7 +146,7 @@ def handle_function(it, size_instruction_bytes, size_op_bits: int, size_b_bits: 
     num_functions = get_int32(it)
     functions = []
     for i in range(num_functions):
-        functions.append(handle_function(it, size_instruction_bytes, size_op_bits, size_b_bits))
+        functions.append(handle_chunk(it, size_instruction_bytes, size_op_bits, size_b_bits))
 
     # Instruction
     num_instruction = get_int32(it)
@@ -153,7 +154,7 @@ def handle_function(it, size_instruction_bytes, size_op_bits: int, size_b_bits: 
     for i in range(num_instruction):
         instructions.append(get_int32(it))
 
-    return Chunk(name, line, parameters, variadic, max_stack, locals, lines, strings, numbers, functions, instructions)
+    return Chunk(name, line, parameters, variadic, stacks, locals, lines, strings, numbers, functions, instructions)
 
 
 def main(file, folder: Path):
