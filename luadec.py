@@ -1,108 +1,286 @@
-import os.path
 import sys
 import pickle
 from pathlib import Path
 
 from shared import Chunk
 from iter import Iterator
-from lua4 import OP, OP_NAME, get_OP, get_B, get_S, ASTRoot, ASTClosure, ASTCall
+from lua4 import OP, OP_NAME, get_OP, get_B, get_S, get_U, get_A
+from lua4 import ASTRoot, ASTClosure, ASTCall, \
+    ASTAssignment, ASTPrimitive, ASTTable, ASTMap, ASTCondition
 
 
-def process_closure(it: Iterator, chunk: Chunk, stack, local_vars):
+class State:
+    def __init__(self):
+        self.parameters = []
+        self.locals = []
+        self.stack = []
+
+
+def process_closure(it: Iterator, chunk: Chunk, state: State):
     name = ''
     statements = []
 
-    operator = it.next()
+    instruction = it.next()
+    operator = get_OP(instruction)
 
     if operator == OP.SETGLOBAL:
-        name = chunk.strings[get_B(operator)]
+        name = chunk.strings[get_B(instruction)]
+        it.next()
     else:
         it.prev()
 
     for child in chunk.functions:
         statements.append(process_chunk(child))
 
-    operator = it.next()
-    if operator != OP.END:
-        assert False, 'END operator expected!'
-
-    return ASTClosure(name, statements)
+    return ASTClosure(name, state.parameters, statements)
 
 
-def process_call(it: Iterator, chunk: Chunk, stack, local_vars):
-    def map_type(args):
-        out = []
-        for arg in args:
-            if isinstance(arg, (int, float)):
-                out.append(str(arg))
-            else:
-                out.append(f'"{str(arg)}"')
-        return out
+def process_call(it: Iterator, chunk: Chunk, state: State):
+    args = []
+    while state.stack:
+        args.append(state.stack.pop())
 
-    return ASTCall(stack[0], map_type(stack[1:]))
-
-
-def skip(it: Iterator, chunk: Chunk, stack, local_vars):
-    pass
-
-
-def build_stack(it: Iterator, chunk: Chunk, stack, local_vars):
-    instruction = it.get()
-    operator = get_OP(instruction)
-
-    if operator == OP.GETGLOBAL:
-        stack.append(chunk.strings[get_B(instruction)])
-    elif operator == OP.GETLOCAL:
-        stack.append(local_vars[get_B(instruction) - 1])  # index starts from 1 and not 0
-    elif operator == OP.PUSHINT:
-        stack.append(get_S(instruction) + 1)  # unclear why +1 is necessary
-    elif operator == OP.PUSHNUM:
-        stack.append(chunk.numbers[get_B(instruction)])
-    elif operator == OP.PUSHNEGNUM:
-        stack.append(chunk.numbers[get_B(instruction)] * -1)
-    elif operator == OP.PUSHSTRING:
-        stack.append(chunk.strings[get_B(instruction)])
+    if args:
+        name = args.pop()
     else:
-        print('#TODO:', OP_NAME[operator])
+        name = ASTPrimitive('')
+
+    return ASTCall(
+        name.value,
+        reversed(args))
+
+
+def process_assignment(it: Iterator, chunk: Chunk, state: State):
+    return ASTAssignment(
+        ASTPrimitive('var'),
+        ASTPrimitive(0))
+
+
+def process_set_table(it: Iterator, chunk: Chunk, state: State):
+    right = state.stack.pop()
+    left = state.stack.pop()
+
+    return ASTAssignment(
+        left,
+        right)
+
+
+def process_create_table(it: Iterator, chunk: Chunk, state: State):
+    num_entries = get_B(it.get())
+    it.next()
+
+    entries = []
+
+    name = state.stack.pop()
+
+    for _ in range(num_entries):
+        build_stack(it, chunk, state)
+        it.next()
+
+        operator = get_OP(it.get())
+        if operator in PROCESS:
+            state.stack.append(PROCESS[operator](it, chunk, state))
+        else:
+            build_stack(it, chunk, state)
+        it.next()
+
+        value = state.stack.pop()
+        key = state.stack.pop()
+        entries.append(ASTAssignment(key, value))
+
+    return ASTTable(
+        name.value,
+        entries)
+
+
+def process_map(it: Iterator, chunk: Chunk, state: State):
+    return ASTMap(
+        'map',
+        [ASTPrimitive(0)])
+
+
+def process_condition(it: Iterator, chunk: Chunk, state: State):
+    operator = get_OP(it.get())
+
+    if operator == OP.JMPT:
+        condition = f'if {state.stack.pop().print()} ~= nil then\n'
+
+    elif operator == OP.JMPF:
+        condition = f'if {state.stack.pop().print()} == nil then\n'
+
+    elif operator == OP.JMPNE:
+        right = state.stack.pop()
+        left = state.stack.pop()
+        condition = f'if {left.print()} ~= {right.print()} then\n'
+
+    elif operator == OP.JMPEQ:
+        right = state.stack.pop()
+        left = state.stack.pop()
+        condition = f'if {left.print()} == {right.print()} then\n'
+
+    elif operator == OP.JMPLT:
+        right = state.stack.pop()
+        left = state.stack.pop()
+        condition = f'if {left.print()} < {right.print()} then\n'
+
+    elif operator == OP.JMPLE:
+        right = state.stack.pop()
+        left = state.stack.pop()
+        condition = f'if {left.print()} <= {right.print()} then\n'
+
+    elif operator == OP.JMPGT:
+        right = state.stack.pop()
+        left = state.stack.pop()
+        condition = f'if {left.print()} > {right.print()} then\n'
+
+    elif operator == OP.JMPGE:
+        right = state.stack.pop()
+        left = state.stack.pop()
+        condition = f'if {left.print()} >= {right.print()} then\n'
+
+    # elif operator == OP.JMPONT:
+    #    value = f'\n'
+
+    # elif operator == OP.JMPONF:
+    #    value = f'\n'
+
+    # elif operator == OP.JMP:
+    #    value = f'\n'
+
+    else:
+        condition = '#TODO'
+
+    block = []
+    while state.stack:
+        block.append(state.stack.pop())
+
+    return ASTCondition(condition, block)
 
 
 PROCESS = {
-    OP.CLOSURE: process_closure,
-    OP.CALL:    process_call
+    OP.CLOSURE:     process_closure,
+    OP.CALL:        process_call,
+    OP.SETGLOBAL:   process_assignment,
+    OP.SETTABLE:    process_set_table,
+    OP.CREATETABLE: process_create_table,
+    OP.SETMAP:      process_map,
+    OP.JMPNE:       process_condition,
+    OP.JMPEQ:       process_condition,
+    OP.JMPLT:       process_condition,
+    OP.JMPLE:       process_condition,
+    OP.JMPGT:       process_condition,
+    OP.JMPGE:       process_condition,
+    OP.JMPT:        process_condition,
+    OP.JMPF:        process_condition,
 }
 
 
-SKIP = {
-    OP.END: 0
-}
+def build_stack(it: Iterator, chunk: Chunk, state: State):
+    instruction = it.get()
+    operator = get_OP(instruction)
+
+    # Get
+
+    if operator == OP.GETGLOBAL:
+        value = chunk.strings[get_B(instruction)]
+
+    elif operator == OP.GETLOCAL:
+        index = get_B(instruction)
+
+        # Create local variable names (SWBF does not store local variable names)
+        while len(state.locals) <= index:
+            state.locals.append(f'l{len(state.locals)}')
+
+        value = state.locals[index]
+
+    elif operator == OP.GETDOTTED:
+        left = state.stack.pop()
+        right = chunk.strings[get_B(instruction)]
+        value = f'{left.print()}.{right}'
+
+    # Push
+
+    elif operator == OP.PUSHNIL:
+        value = 'nil'
+
+    elif operator == OP.PUSHINT:
+        value = get_S(instruction) + 1  # unclear why +1 is necessary
+
+    elif operator == OP.PUSHNUM:
+        value = chunk.numbers[get_B(instruction)]
+
+    elif operator == OP.PUSHNEGNUM:
+        value = chunk.numbers[get_B(instruction)] * -1
+
+    elif operator == OP.PUSHSTRING:
+        value = f'"{chunk.strings[get_B(instruction)]}"'
+
+    # Arithmetic
+
+    elif operator == OP.MULT:
+        right = state.stack.pop()
+        left = state.stack.pop()
+        value = f'({left.print()} * {right.print()})'
+
+    elif operator == OP.ADDI:
+        value = f' + {get_B(instruction)}'
+
+    elif operator == OP.ADD:
+        right = state.stack.pop()
+        left = state.stack.pop()
+        value = f'({left.print()} + {right.print()})'
+
+    elif operator == OP.SUB:
+        right = state.stack.pop()
+        left = state.stack.pop()
+        value = f'({left.print()} - {right.print()})'
+
+    else:
+        print('#TODO:', OP_NAME[operator])
+        return
+
+    state.stack.append(ASTPrimitive(value))
 
 
 def process_chunk(chunk: Chunk):
     it = Iterator(chunk.instructions)
 
-    stack = []
-    local_vars = []
+    #print(f'{chunk.name=}, {chunk.parameters=}, {len(chunk.functions)=}, {chunk.stacks=}, {len(chunk.strings)=}, {len(chunk.numbers)=}')
+
+    state = State()
 
     root = ASTRoot()
 
-    # Local variable definition at the start of a chunk
-    while get_OP(it.get()) == OP.PUSHINT:
-        local = get_B(it.get())
-        local_vars.append(local)
+    # Parameter definition at the start of a chunk
+    for parameter in range(chunk.parameters):
+        state.parameters.append(f'p{parameter}')
         it.next()
-    it.prev()
+
+    # Local variable definition at the start of a chunk #TODO
+    local = 0
+    while get_OP(it.get()) == OP.PUSHINT:
+        name = f'l{local}'
+        value = get_B(it.get())
+        state.locals.append(name)
+        it.next()
+        local += 1
+
+        root += ASTAssignment(ASTPrimitive(name), ASTPrimitive(value))
 
     try:
-        for instruction in it:
-            operator = get_OP(instruction)
+        while it:
+            operator = get_OP(it.get())
 
             if operator in PROCESS:
-                root += PROCESS[operator](it, chunk, stack, local_vars)
-                stack = []
-            elif operator in SKIP:
+                root += PROCESS[operator](it, chunk, state)
+
+            elif operator == OP.END:  # End of chunk
                 pass
+
             else:
-                build_stack(it, chunk, stack, local_vars)
+                build_stack(it, chunk, state)
+
+            it.next()
 
     except StopIteration as e:
         pass
@@ -112,10 +290,37 @@ def process_chunk(chunk: Chunk):
     return root
 
 
+def debug(chunk, level = 0):
+    it = Iterator(chunk.instructions)
+
+    def printf(i):
+        op = get_OP(i)
+        print(
+            '{} '
+            '{:<15} {:>10} {:>10} {:>10} {:>10} {:<10}'.format(
+                '  ' * level,
+                OP_NAME[op], i, get_U(i), get_B(i), get_S(i),
+                '' if get_B(i) >= len(chunk.strings) else chunk.strings[get_B(i)]))
+
+    while it:
+        printf(it.get())
+
+        it.next()
+
+    it.prev()
+
+    for child in chunk.functions:
+        debug(child, level + 1)
+
+    printf(it.next())
+
+
 def main(file: Path):
     chunk = pickle.load(open(file, 'rb'))
 
     ast = process_chunk(chunk)
+
+    debug(chunk)
 
     script_name = str(file.parent / file.stem) + '.lua'
     print(script_name)

@@ -97,6 +97,14 @@ class OP:
     JMPF, JMPONT, JMPONF, JMP, PUSHNILJMP, FORPREP, FORLOOP, LFORPREP, LFORLOOP, CLOSURE = range(49)
 
 
+class ASTPrimitive:
+    def __init__(self, value):
+        self.value = value
+
+    def print(self, level: int = 0):
+        return str(self.value)
+
+
 class ASTRoot:
     INDENT = '  '
 
@@ -110,7 +118,7 @@ class ASTRoot:
         self.statements.append(other)
         return self
 
-    def print(self, level: int):
+    def print(self, level: int = 0):
         children = ''
         for child in self.statements:
             children += child.print(level) + '\n'
@@ -119,15 +127,16 @@ class ASTRoot:
 
 
 class ASTClosure:
-    def __init__(self, name: str, statements: iter = None):
+    def __init__(self, name: str, parameters: [str], statements: iter = None):
         self.name = name
+        self.parameters = parameters
 
         if not statements:
             self.statements = []
         else:
             self.statements = statements
 
-    def print(self, level: int):
+    def print(self, level: int = 0):
         indent = ASTRoot.INDENT * level
 
         children = ''
@@ -135,13 +144,13 @@ class ASTClosure:
             children += child.print(level + 1) + '\n'
 
         return str(
-            f'{indent}function {self.name}()\n'
+            f'{indent}function {self.name}({",".join(self.parameters)})\n'
             f'{children}'
             f'{indent}end\n')
 
 
 class ASTCall:
-    def __init__(self, name: str, args: iter = None):
+    def __init__(self, name: str, args: [ASTPrimitive] = None):
         self.name = name
 
         if not args:
@@ -149,17 +158,65 @@ class ASTCall:
         else:
             self.args = args
 
+    def print(self, level: int = 0):
+        indent = ASTRoot.INDENT * level
+        return f'{indent}{self.name}({", ".join(list(map(lambda x: x.print(level), self.args)))})'
+
+
+class ASTAssignment:
+    def __init__(self, left: ASTPrimitive, right: ASTPrimitive):
+        self.left = left.print()
+        self.right = right.print()
+
     def print(self, level: int):
         indent = ASTRoot.INDENT * level
-        return f'{indent}{self.name}({", ".join(list(map(str, self.args)))})'
+        return f'{indent}{self.left} = {self.right}'
 
 
-class Assignment:
-    def __init__(self, variable, value):
-        self._variable = variable
-        self._value = value
+class ASTCondition:
+    def __init__(self, condition: str, block: [ASTPrimitive]):
+        self.condition = condition
+        self.block = block
+
+    def print(self, level: int):
+        indent = ASTRoot.INDENT * level
+        subindent = ASTRoot.INDENT * (level + 1)
+        nl = '\n'
+        return str(
+            f'{indent}{self.condition}{subindent}'
+            f'{("," + nl + subindent).join(list(map(lambda x: x.print(level), self.block)))}'
+            f'{subindent}{self.condition}')
 
 
-class Condition:
-    def __init__(self, condition):
-        pass
+class ASTTable:
+    def __init__(self, variable: str, values: [ASTPrimitive]):
+        self.variable = variable
+        self.values = values
+
+    def print(self, level: int = 0):
+        indent = ASTRoot.INDENT * level
+        subindent = ASTRoot.INDENT * (level + 1)
+        nl = '\n'
+        return str(
+            f'{indent}{self.variable} = {{\n{subindent}'
+            f'{("," + nl + subindent).join(list(map(lambda x: x.print(level), self.values)))}'
+            f'\n{indent}}}\n')
+
+
+class ASTMap:
+    def __init__(self, name: str, values: [ASTPrimitive]):
+        self.name = name
+        self.values = values
+
+    def print(self, level: int = 0):
+        return '#map#'
+
+
+class ASTArithmeticOperator:
+    def __init__(self, left, right, operator: str):
+        self.left = left.print()
+        self.right = right.print()
+        self.op = operator
+
+    def print(self, level: int = 0):
+        return f'{self.left} {self.op} {self.right}'
