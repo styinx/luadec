@@ -103,40 +103,40 @@ def process_condition(it: Iterator, chunk: Chunk, state: State):
     operator = get_OP(it.get())
 
     if operator == OP.JMPT:
-        condition = f'if {state.stack.pop().print()} ~= nil then\n'
+        condition = f'{state.stack.pop().print()} ~= nil'
 
     elif operator == OP.JMPF:
-        condition = f'if {state.stack.pop().print()} == nil then\n'
+        condition = f'{state.stack.pop().print()} == nil'
 
     elif operator == OP.JMPNE:
         right = state.stack.pop()
         left = state.stack.pop()
-        condition = f'if {left.print()} ~= {right.print()} then\n'
+        condition = f'{left.print()} ~= {right.print()}'
 
     elif operator == OP.JMPEQ:
         right = state.stack.pop()
         left = state.stack.pop()
-        condition = f'if {left.print()} == {right.print()} then\n'
+        condition = f'{left.print()} == {right.print()}'
 
     elif operator == OP.JMPLT:
         right = state.stack.pop()
         left = state.stack.pop()
-        condition = f'if {left.print()} < {right.print()} then\n'
+        condition = f'{left.print()} < {right.print()}'
 
     elif operator == OP.JMPLE:
         right = state.stack.pop()
         left = state.stack.pop()
-        condition = f'if {left.print()} <= {right.print()} then\n'
+        condition = f'{left.print()} <= {right.print()}'
 
     elif operator == OP.JMPGT:
         right = state.stack.pop()
         left = state.stack.pop()
-        condition = f'if {left.print()} > {right.print()} then\n'
+        condition = f'{left.print()} > {right.print()}'
 
     elif operator == OP.JMPGE:
         right = state.stack.pop()
         left = state.stack.pop()
-        condition = f'if {left.print()} >= {right.print()} then\n'
+        condition = f'{left.print()} >= {right.print()}'
 
     # elif operator == OP.JMPONT:
     #    value = f'\n'
@@ -148,11 +148,17 @@ def process_condition(it: Iterator, chunk: Chunk, state: State):
     #    value = f'\n'
 
     else:
-        condition = '#TODO'
+        condition = '#TODO condition'
 
     block = []
-    while state.stack:
-        block.append(state.stack.pop())
+    nested_state = State()
+    operator = get_OP(it.next())
+    while operator != OP.END:
+        if operator in PROCESS:
+            block.append(PROCESS[operator](it, chunk, nested_state))
+        else:
+            build_stack(it, chunk, nested_state)
+        operator = get_OP(it.next())
 
     return ASTCondition(condition, block)
 
@@ -270,6 +276,7 @@ def process_chunk(chunk: Chunk):
     try:
         while it:
             operator = get_OP(it.get())
+            print('##', OP_NAME[operator])
 
             if operator in PROCESS:
                 root += PROCESS[operator](it, chunk, state)
@@ -290,9 +297,7 @@ def process_chunk(chunk: Chunk):
     return root
 
 
-def debug(chunk, level = 0):
-    it = Iterator(chunk.instructions)
-
+def debug(chunk: Chunk, level: int = 0):
     def printf(i):
         op = get_OP(i)
         print(
@@ -302,6 +307,7 @@ def debug(chunk, level = 0):
                 OP_NAME[op], i, get_U(i), get_B(i), get_S(i),
                 '' if get_B(i) >= len(chunk.strings) else chunk.strings[get_B(i)]))
 
+    it = Iterator(chunk.instructions)
     while it:
         printf(it.get())
 

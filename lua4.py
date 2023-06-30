@@ -1,4 +1,5 @@
 INT_MAX = 2147483647 - 2
+NL = '\n'
 
 
 def get_OP(instruction: int) -> int:
@@ -181,11 +182,10 @@ class ASTCondition:
     def print(self, level: int):
         indent = ASTRoot.INDENT * level
         subindent = ASTRoot.INDENT * (level + 1)
-        nl = '\n'
         return str(
-            f'{indent}{self.condition}{subindent}'
-            f'{("," + nl + subindent).join(list(map(lambda x: x.print(level), self.block)))}'
-            f'{subindent}{self.condition}')
+            f'{indent}if {self.condition} then\n{subindent}'
+            f'{(NL + subindent).join(list(map(lambda x: x.print(level), self.block)))}'
+            f'\n{indent}end')
 
 
 class ASTTable:
@@ -196,10 +196,9 @@ class ASTTable:
     def print(self, level: int = 0):
         indent = ASTRoot.INDENT * level
         subindent = ASTRoot.INDENT * (level + 1)
-        nl = '\n'
         return str(
             f'{indent}{self.variable} = {{\n{subindent}'
-            f'{("," + nl + subindent).join(list(map(lambda x: x.print(level), self.values)))}'
+            f'{("," + NL + subindent).join(list(map(lambda x: x.print(level), self.values)))}'
             f'\n{indent}}}\n')
 
 
