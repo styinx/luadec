@@ -22,6 +22,10 @@ def get_B(instruction: int) -> int:
     return (instruction & 0x00007FC0) >> 6
 
 
+def get_Bx(instruction: int) -> int:
+    return (instruction & 0xFFFFFFC0) >> (6 + 9)
+
+
 OP_NAME = [
     "END",  # 0b000000, 0
     "RETURN",  # 0b000001, 1
@@ -128,25 +132,17 @@ class ASTRoot:
 
 
 class ASTClosure:
-    def __init__(self, name: str, parameters: [str], statements: iter = None):
+    def __init__(self, name: str, parameters: [str], body: ASTRoot = None):
         self.name = name
         self.parameters = parameters
-
-        if not statements:
-            self.statements = []
-        else:
-            self.statements = statements
+        self.body = body
 
     def print(self, level: int = 0):
         indent = ASTRoot.INDENT * level
 
-        children = ''
-        for child in self.statements:
-            children += child.print(level + 1) + '\n'
-
         return str(
             f'{indent}function {self.name}({",".join(self.parameters)})\n'
-            f'{children}'
+            f'{self.body.print(level + 1)}'
             f'{indent}end\n')
 
 

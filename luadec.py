@@ -4,7 +4,7 @@ from pathlib import Path
 
 from shared import Chunk
 from iter import Iterator
-from lua4 import OP, OP_NAME, get_OP, get_B, get_S, get_U, get_A
+from lua4 import OP, OP_NAME, get_OP, get_B, get_Bx, get_S, get_U, get_A
 from lua4 import ASTRoot, ASTClosure, ASTCall, \
     ASTAssignment, ASTPrimitive, ASTTable, ASTMap, ASTCondition
 
@@ -18,7 +18,6 @@ class State:
 
 def process_closure(it: Iterator, chunk: Chunk, state: State):
     name = ''
-    statements = []
 
     instruction = it.next()
     operator = get_OP(instruction)
@@ -29,10 +28,9 @@ def process_closure(it: Iterator, chunk: Chunk, state: State):
     else:
         it.prev()
 
-    for child in chunk.functions:
-        statements.append(process_chunk(child))
+    body = process_chunk(chunk.functions[get_Bx(it.get())])
 
-    return ASTClosure(name, state.parameters, statements)
+    return ASTClosure(name, state.parameters, body)
 
 
 def process_call(it: Iterator, chunk: Chunk, state: State):
@@ -276,7 +274,7 @@ def process_chunk(chunk: Chunk):
     try:
         while it:
             operator = get_OP(it.get())
-            print('##', OP_NAME[operator])
+            #print('##', OP_NAME[operator], it._pos)
 
             if operator in PROCESS:
                 root += PROCESS[operator](it, chunk, state)
@@ -302,9 +300,9 @@ def debug(chunk: Chunk, level: int = 0):
         op = get_OP(i)
         print(
             '{} '
-            '{:<15} {:>10} {:>10} {:>10} {:>10} {:<10}'.format(
+            '{:<15} {:>10} {:>10} {:>10} {:>10} {:>14} {:>20} {:<10}'.format(
                 '  ' * level,
-                OP_NAME[op], i, get_U(i), get_B(i), get_S(i),
+                OP_NAME[op], i, get_U(i), get_B(i), get_Bx(i), get_S(i), bin(get_U(i)),
                 '' if get_B(i) >= len(chunk.strings) else chunk.strings[get_B(i)]))
 
     it = Iterator(chunk.instructions)
@@ -315,16 +313,26 @@ def debug(chunk: Chunk, level: int = 0):
 
     it.prev()
 
-    for child in chunk.functions:
-        debug(child, level + 1)
-
     printf(it.next())
 
 
 def main(file: Path):
     chunk = pickle.load(open(file, 'rb'))
 
+    def rec(c: Chunk):
+        idx = 0
+        for i in Iterator(c.instructions):
+            if get_OP(i) == OP.CLOSURE:
+                rec(c.functions[idx])
+                idx += 1
+            print(OP_NAME[get_OP(i)])
+    rec(chunk)
+
     ast = process_chunk(chunk)
+
+    print(
+        '{} '
+        '{:<15} {:>10} {:>10} {:>10} {:>10} {:>14} {:>20} {:<10}'.format('', 'OP', 'code', 'U', 'B', 'Bx', 'S', 'bits', 'str'))
 
     debug(chunk)
 
