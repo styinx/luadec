@@ -28,6 +28,7 @@ def process_closure(it: Iterator, chunk: Chunk, state: State):
     else:
         it.prev()
 
+    print(chunk.functions[get_Bx(it.get())].instructions)
     body = process_chunk(chunk.functions[get_Bx(it.get())])
 
     return ASTClosure(name, state.parameters, body)
@@ -274,7 +275,7 @@ def process_chunk(chunk: Chunk):
     try:
         while it:
             operator = get_OP(it.get())
-            #print('##', OP_NAME[operator], it._pos)
+            print('##', OP_NAME[operator], it._pos)
 
             if operator in PROCESS:
                 root += PROCESS[operator](it, chunk, state)
